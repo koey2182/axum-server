@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 axum = "0.8.8"
 axum-extra = {version = "0.12.5", features = ["typed-header"]}
+chrono = "0.4.43"
 dotenvy = "0.15.7"
 jsonwebtoken = {version = "10.3.0", features = ['aws_lc_rs']}
 serde = "1.0.228"
