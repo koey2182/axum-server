@@ -1,128 +1,78 @@
-Axum에서 `State`로 `PgPool`을 주입한다는 것은,
-"전역 변수로 DB를 꺼내 쓰는 방식" 대신
-"앱 시작 시 만든 DB 풀을 라우터에 넣고, 핸들러가 필요할 때 안전하게 받아 쓰는 방식"입니다.
+`state.rs` 파일을 추가하는 이유는 한 줄로 말하면:
 
-이 방식이 실무에서 더 정석인 이유는 다음과 같습니다.
-
-- 테스트가 쉬움: 테스트용 풀(mock/테스트 DB)로 바꿔 주입 가능
-- 전역 상태 의존이 줄어듦: 코드 추적이 쉬움
-- Axum 구조와 잘 맞음: 라우터가 사용하는 상태를 타입으로 명시
+**앱 전역 상태(`AppState`)를 한 곳에서 정의/관리해서 결합도를 낮추고 확장성을 높이기 위해서**입니다.
 
 ---
 
-## 1) 먼저 `AppState`를 만든다
+## 1) 왜 굳이 파일을 분리하나?
 
-보통 여러 공용 리소스를 묶어서 상태 구조체를 만듭니다.
+`AppState`를 `app.rs`나 `router.rs` 안에 두면 처음엔 편하지만,
+기능이 늘수록 아래 문제가 생깁니다.
 
-```rust
-use sqlx::PgPool;
+1. 상태 타입 위치를 찾기 어려움
+- 각 모듈이 `AppState`를 쓰는데 정의 위치가 라우팅 파일 안에 있으면 탐색성이 떨어짐
 
-#[derive(Clone)]
-pub struct AppState {
-    pub pool: PgPool,
-}
+2. 순환 의존/과한 의존 가능성 증가
+- 라우터/핸들러가 상태를 쓰고, 상태가 또 라우터 타입을 참조하는 식으로 구조가 꼬이기 쉬움
+
+3. 변경 파급 범위 확대
+- 상태 필드 하나 추가해도 라우터/핸들러 파일 전체가 함께 변경되는 패턴이 반복됨
+
+`state.rs`로 분리하면 상태를 "인프라 계약"으로 고정할 수 있습니다.
+
+---
+
+## 2) 분리했을 때 얻는 실질적 이점
+
+1. 책임 분리
+- `main.rs`: 부팅
+- `app.rs`: 라우터 조립
+- `state.rs`: 공통 상태 정의
+
+2. 모듈 간 결합 감소
+- 각 기능 모듈이 `crate::state::AppState`만 참조
+- 상태 정의 위치가 일관되어 의존 방향이 명확해짐
+
+3. 확장 용이
+- 초기에 `pool`만 있더라도,
+  나중에 `redis`, `config`, `mailer`, `feature_flags` 등을 `AppState`에 추가하기 쉬움
+
+4. 테스트 준비성 개선
+- 테스트에서 대체 state(mock 포함)를 설계할 때 기준점이 명확
+
+---
+
+## 3) TO-BE 권장 구조
+
+```text
+src/
+  main.rs      # 서버 실행
+  app.rs       # Router 조립
+  state.rs     # AppState 정의
+  api/...
+  token/...
 ```
 
-왜 `Clone`?
-
-- Axum은 내부적으로 상태를 라우터/서비스에 복사해서 들고 있어야 할 때가 있습니다.
-- `PgPool`의 `clone()`은 "새 DB 연결 생성"이 아니라 "같은 풀 핸들 공유"라서 비용이 작습니다.
+`state.rs`는 가능한 한 "상태 타입만" 두고,
+라우터/핸들러 로직은 넣지 않는 것이 정석입니다.
 
 ---
 
-## 2) `main`에서 풀을 만든 뒤 라우터에 주입한다
+## 4) 언제 특히 필요해지나
 
-현재 `main.rs`는 풀을 생성하지만 라우터에 연결하지 않고 있습니다.
-`with_state(...)`를 붙여서 주입해야 핸들러에서 꺼내 쓸 수 있습니다.
+아래 중 2개 이상이면 `state.rs` 분리 이득이 큽니다.
 
-```rust
-use axum::{Router, routing::{get, post}};
-use sqlx::PgPool;
-
-#[derive(Clone)]
-struct AppState {
-    pool: PgPool,
-}
-
-#[tokio::main]
-async fn main() {
-    dotenvy::dotenv().ok();
-
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("postgres is not ready");
-
-    let state = AppState { pool };
-
-    let app = Router::new()
-        .route("/", get(handler))
-        .route("/authorize", post(authorize))
-        .route("/protected", get(protected))
-        .route("/refresh", post(refresh))
-        .with_state(state);
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}
-```
+- 기능 모듈이 2개 이상 (`auth`, `users`, `posts` 등)
+- 상태 필드가 2개 이상 (`pool`, `redis`, `config` 등)
+- 팀 작업으로 파일 충돌이 발생하기 시작
+- 테스트 코드에서 상태 주입이 필요
 
 ---
 
-## 3) 핸들러에서 `State<AppState>`로 꺼내 쓴다
+## 결론
 
-핸들러 인자에 `State(state): State<AppState>`를 추가하면 됩니다.
+`state.rs` 추가는 단순한 파일 분할이 아니라,
+**"전역 상태를 독립 계약으로 만들기 위한 아키텍처 정리"**입니다.
 
-```rust
-use axum::extract::State;
-
-async fn users(State(state): State<AppState>) -> Result<String, AuthError> {
-    let row: (i64,) = sqlx::query_as("SELECT 1")
-        .fetch_one(&state.pool)
-        .await
-        .map_err(|_| AuthError::InvalidToken)?;
-
-    Ok(format!("db ok: {}", row.0))
-}
-```
-
-핵심 포인트:
-
-- `State<T>`의 `T`는 라우터에 `with_state(...)`로 넣은 타입과 같아야 합니다.
-- 타입이 다르면 컴파일 에러가 납니다.
-- 즉, 런타임에서 터지는 게 아니라 컴파일 시점에 잡아줍니다.
-
----
-
-## 4) `PgPool`만 직접 상태로 넣는 단순형도 가능
-
-앱이 작다면 `AppState` 없이 바로 `PgPool` 자체를 상태로 써도 됩니다.
-
-```rust
-let app = Router::new()
-    .route("/users", get(users))
-    .with_state(pool);
-
-async fn users(State(pool): State<PgPool>) {
-    // pool 사용
-}
-```
-
-하지만 보통은 나중에 `redis`, `config`, `jwt key` 등이 추가되므로
-처음부터 `AppState` 구조체로 묶는 편이 확장성에 유리합니다.
-
----
-
-## 5) 현재 프로젝트 기준 정리
-
-현재 코드에서는 아래 방향이 가장 자연스럽습니다.
-
-- `src/main.rs`에서 `PgPool::connect(...).await` 수행
-- `AppState { pool }` 생성
-- `Router::new()...with_state(state)` 적용
-- DB가 필요한 핸들러만 `State<AppState>` 인자 추가
-
-즉, `src/db.rs`의 전역 `LazyLock` 패턴보다,
-`main`에서 생성한 풀을 Axum `State`로 주입하는 방식이 더 정석적이고 유지보수에 좋습니다.
+작은 프로젝트에서도 미리 분리해두면,
+기능이 늘 때 구조가 무너지지 않고 유지보수가 훨씬 쉬워집니다.

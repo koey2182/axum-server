@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use axum::{Json, RequestPartsExt, extract::FromRequestParts, http::StatusCode, response::IntoResponse};
+use axum::{Json, RequestPartsExt, extract::{FromRequestParts}, http::StatusCode, response::IntoResponse};
 use axum_extra::{TypedHeader, headers::{Authorization, authorization::Bearer}};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
@@ -52,7 +52,7 @@ pub fn generate_refresh_token(claims: RefreshClaims)-> Result<String, AuthError>
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessClaims {
-    user_id: String,
+    pub user_id: String,
     exp: usize
 }
 impl AccessClaims {
