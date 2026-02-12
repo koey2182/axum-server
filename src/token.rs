@@ -7,6 +7,8 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode}
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::id::ulid;
+
 
 static KEYS: LazyLock<Keys> = LazyLock::new(|| {
     let access_secret = std::env::var("ACCESS_SECRET").expect("ACCESS_SECRET must be set");
@@ -53,37 +55,21 @@ pub fn generate_refresh_token(claims: RefreshClaims)-> Result<String, AuthError>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessClaims {
     pub user_id: String,
-    exp: usize
+    exp: usize,
+    iat: usize
 }
 impl AccessClaims {
     pub fn new(user_id: String) -> Self {
-        let exp = Utc::now() + Duration::minutes(TOKEN_LIFE.access_minutes);
+        let iat = Utc::now();
+        let exp = iat + Duration::minutes(TOKEN_LIFE.access_minutes);
         Self {
             user_id,
-            exp: usize::try_from(exp.timestamp()).expect("exp is not usize")
+            exp: usize::try_from(exp.timestamp()).expect("exp is not usize"),
+            iat: usize::try_from(iat.timestamp()).expect("iat is not usize")
         }
     }
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RefreshClaims {
-    user_id: String,
-    exp: usize
-}
-impl RefreshClaims {
-    pub fn new(user_id: String) -> Self {
-        let exp = Utc::now() + Duration::days(TOKEN_LIFE.refresh_days);
-        Self {
-            user_id,
-            exp: usize::try_from(exp.timestamp()).expect("exp is not usize")
-        }
-    }
-}
-
-pub struct AccessInfo {
-    pub user_id: String
-}
-impl<S> FromRequestParts<S> for AccessInfo where S: Send + Sync {
+impl<S> FromRequestParts<S> for AccessClaims where S: Send + Sync {
     type Rejection = AuthError;
 
     async fn from_request_parts(
@@ -92,16 +78,31 @@ impl<S> FromRequestParts<S> for AccessInfo where S: Send + Sync {
         ) -> Result<Self, Self::Rejection> {
         let TypedHeader(Authorization(bearer)) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await.map_err(|_| AuthError::InvalidToken)?;
         let token_data = decode::<AccessClaims>(bearer.token(), &KEYS.access_decoding, &Validation::default()).map_err(|err| {println!("{err}"); AuthError::InvalidToken})?;
-        let access_claims = token_data.claims;
-        
-        Ok(AccessInfo { user_id: access_claims.user_id })
+        Ok(token_data.claims)
     }
 }
 
-pub struct RefreshInfo {
-    pub user_id: String
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefreshClaims {
+    pub jti: String,
+    pub user_id: String,
+    exp: usize,
+    iat: usize
 }
-impl <S> FromRequestParts<S> for RefreshInfo where  S: Send + Sync {
+impl RefreshClaims {
+    pub async fn new(user_id: String) -> Self {
+        let jti= ulid().await;
+        let iat = Utc::now();
+        let exp = iat + Duration::days(TOKEN_LIFE.refresh_days);
+        Self {
+            jti,
+            user_id,
+            exp: usize::try_from(exp.timestamp()).expect("exp is not usize"),
+            iat: usize::try_from(iat.timestamp()).expect("iat is not usize")
+        }
+    }
+}
+impl <S> FromRequestParts<S> for RefreshClaims where  S: Send + Sync {
     type Rejection = AuthError;
 
     async fn from_request_parts(
@@ -110,11 +111,11 @@ impl <S> FromRequestParts<S> for RefreshInfo where  S: Send + Sync {
         ) -> Result<Self, Self::Rejection> {
         let TypedHeader(Authorization(bearer)) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await.map_err(|_| AuthError::InvalidToken)?;
         let token_data = decode::<RefreshClaims>(bearer.token(), &KEYS.refresh_decoding, &Validation::default()).map_err(|_| AuthError::InvalidToken)?;
-        Ok(RefreshInfo { user_id: token_data.claims.user_id })
+        Ok(token_data.claims)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum AuthError {
     WrongCredentials,
     MissingCredentials,
