@@ -141,9 +141,11 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "axum-extra",
+ "bytes",
  "chrono",
  "dotenvy",
  "jsonwebtoken",
+ "mqttbytes",
  "serde",
  "serde_json",
  "sqlx",
@@ -1003,6 +1005,15 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mqttbytes"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9b7801639a5398353b9acf0764907d6571ca92e6b7a3662013b03861789449c"
+dependencies = [
+ "bytes",
 ]
 
 [[package]]

@@ -3,3 +3,4 @@ pub mod state;
 pub mod api;
 pub mod app;
 pub mod id;
+pub mod mqtt;
