@@ -37,7 +37,7 @@ async fn protected(claims: AccessClaims) -> Result<String, AuthError> {
     Ok(format!("Welcome to the protected area :)\nYour data: {}\n", claims.user_id))
 } 
 
-pub async fn refresh(refresh_claims: RefreshClaims, State(AppState{pool}): State<AppState>) -> Response<Body> {
+pub async fn refresh(refresh_claims: RefreshClaims, State(AppState{pool, ..}): State<AppState>) -> Response<Body> {
     let db_refresh_token = sqlx::query!(r#"SELECT * FROM refresh_tokens rt WHERE rt.jti = $1;"#, refresh_claims.jti)
         .fetch_optional(&pool).await;
 

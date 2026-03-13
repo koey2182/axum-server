@@ -10,6 +10,8 @@ use tokio::{
     sync::mpsc,
 };
 
+use std::collections::HashMap;
+
 use super::{
     broker::{self, BrokerState},
     HandlerFn,
@@ -22,7 +24,7 @@ const MAX_PACKET: usize = 64 * 1024; // 64 KB
 pub(crate) async fn handle(
     stream:   TcpStream,
     state:    Arc<BrokerState>,
-    handlers: Arc<Vec<(String, HandlerFn)>>,
+    handlers: Arc<HashMap<String, HandlerFn>>,
 ) {
     let (mut reader, mut writer) = tokio::io::split(stream);
     let (tx, mut rx) = mpsc::channel::<Bytes>(64);
@@ -63,7 +65,7 @@ pub(crate) async fn handle(
     loop {
         match next_packet(&mut reader, &mut buf).await {
             Ok(Packet::Publish(p)) => {
-                broker::dispatch(&state, &handlers, &p).await;
+                broker::dispatch(&state, &handlers, &p);
             }
 
             Ok(Packet::Subscribe(sub)) => {
@@ -102,7 +104,7 @@ pub(crate) async fn handle(
                 pkid:    0,
                 payload: will.message,
             };
-            broker::dispatch(&state, &handlers, &p).await;
+            broker::dispatch(&state, &handlers, &p);
         }
     }
 

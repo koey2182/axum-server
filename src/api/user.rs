@@ -7,7 +7,7 @@ pub fn route() -> Router<AppState> {
         .route("/users", get(users))
 }
 
-async fn users(State(AppState {pool}): State<AppState>) -> Result<String, AuthError> {
+async fn users(State(AppState {pool, ..}): State<AppState>) -> Result<String, AuthError> {
     let row: (String,) = sqlx::query_as("SELECT '홍길동'").fetch_one(&pool).await.map_err(|_| AuthError::WrongCredentials)?;
     Ok(row.0)
 }
